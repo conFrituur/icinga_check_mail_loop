@@ -166,7 +166,7 @@ def imap_search_server(server: imaplib.IMAP4, mailbox: str, expected_token: str,
 
 	@param server: An imaplib.IMAP4 object that represents the sever connection.
 	@param mailbox: Name of the mailbox, such as INBOX or Junk.
-	@param expected_token: Lookup this token in a X-Icinga-Test-Id E-mail header.
+	@param expected_token: Lookup this token in a "X-Icinga-Test-Id" E-mail header.
 	@param cleanup_flag: Remove mails from the IMAP account.
 	@return Function returns a MailFound status.
 	"""
@@ -252,7 +252,7 @@ def main():
 
 	debug_flag = args.debug
 	delay = args.delay
-	
+
 	_uuid = str(uuid.uuid4())
 	email = email_create_message(args.mail_from, args.mail_to, _uuid)
 	smtp_server = smtp_connect(args.smtp_host, args.smtp_port, args.smtp_user, args.smtp_pass)
