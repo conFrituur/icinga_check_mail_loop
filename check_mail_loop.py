@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #
 # -----------------------------------------------------------------------------
-# Copyright (c) 2023 Martin Schobert, Pentagrid AG
+# Copyright (c) 2023-2025 Martin Schobert, Pentagrid AG
 #
 # All rights reserved.
 #
@@ -80,13 +80,17 @@ def email_create_message(mail_from: str, mail_to: str, _uuid: str) -> MIMEText:
 	@return Function returns a MIMEText object.
 	"""
 
-	text = ("Dear Icinga Monitoring Plugin,\n\n"
-			"I hope your overall health is at its best. Today I am writing you another e-mail. I'm afraid you will\n"
-			"take note of this email, maybe read out one or two bon mot and delete this mail. Maybe this is the way\n"
-			"of things and we cannot change anything. The main thing is that everything is fine. I will write to\n"
-			"you again very soon.\n\n"
-			"Greetings\n\n"
-			"The sender\n")
+	text = ("Dear Mail Server,\n\n"
+			"This is your friendly Mail Check. It’s time for your regularly scheduled health inspection. You’ve been "
+			"delivering e-mails like a champ. I hope your overall health is at its best. Today I am writing you "
+			"another e-mail.\n\n"
+			"Please remember, a healthy server is a happy server. Regular maintenance keeps you from joining the "
+			"ghostly ranks of \"former production systems.\" Think of updates as vitamins. They might taste bad now, "
+			"but they prevent those \"critical condition\" messages that make sysadmins cry in the dark.\n\n"
+			"Anyway, just checking in. Stay cool, keep those ports open (the safe ones), and remember: if you ever "
+			"start to feel sluggish, I'm only one alert away. I will write to you again very soon.\n\n"
+			"Warm regards,\n\n"
+			"Your mail check plugin\n")
 
 	msg = MIMEText(text)
 
@@ -142,15 +146,21 @@ def imap_retrieve_mail(imap_host: str, imap_port: int, imap_user: str, imap_pass
 
 	status = MailFound.NOT_FOUND
 
-	# Check which mailboxes to lookup
-	mailboxes = ["INBOX"]
+	# Check which mailboxes to lookup. Start with the spam box (if enabled) to clean it up.
+	mailboxes = []
 	if imap_spambox:
-		debug(f"IMAP: Will also check spambox \"{imap_spambox}\" as fallback.")
+		debug(f"IMAP: Will also check spambox \"{imap_spambox}\".")
 		mailboxes.append(imap_spambox)
+	mailboxes.append("INBOX")
 
 	for i in range(0, 3):
+
+		curr_delay = delay * pow(i+1, 2)
+		if curr_delay > 0:
+			debug(f"IMAP: Waiting for {curr_delay} seconds.")
+			time.sleep(curr_delay)
+
 		for mailbox in mailboxes:
-			time.sleep(delay)
 			status = imap_search_server(server, mailbox, expected_token, cleanup_flag)
 			if status != MailFound.NOT_FOUND:
 				server.logout()
@@ -180,31 +190,40 @@ def imap_search_server(server: imaplib.IMAP4, mailbox: str, expected_token: str,
 	token = ""
 
 	debug(f"IMAP: Check mail in mailbox {mailbox}.")
-	server.select(mailbox)
+	select_status, num_msg_in_mbox = server.select(mailbox)
+	num_msg_in_mbox = int(num_msg_in_mbox[0])
+	debug(f"IMAP: Mailbox selection status: {select_status}")
+	debug(f"IMAP: Mailbox {mailbox} contains {num_msg_in_mbox} messages.")
 
-	typ, data = server.search(None, 'ALL')
-	for num in data[0].split():
+	typ, data_mlist = server.search(None, 'ALL')
+
+	if typ != "OK":
+		return MailFound.UNDEFINED
+
+	for num in data_mlist[0].split():
 
 		num_str = num.decode('utf-8')
 
-		typ, data = server.fetch(num, '(RFC822)')
-		debug(f"IMAP: [{mailbox}]:{num_str} Check mail {num_str}.")
-		email = Email(data[0][1])
-		for line in email.header.splitlines():
+		if token_found == MailFound.NOT_FOUND:
 
-			if line.startswith("X-Icinga-Test-Id"):
-				token = line.split("X-Icinga-Test-Id: ")[1].strip()
-				debug(f"IMAP: [{mailbox}]:{num_str} A token was found: {token}")
+			typ, data_mail = server.fetch(num_str, '(RFC822)')
+			debug(f"IMAP: [{mailbox}]:{num_str} Check mail {num_str}.")
+			email = Email(data_mail[0][1])
+			for line in email.header.splitlines():
 
-		if token == expected_token:
-			debug(f"IMAP: [{mailbox}]:{num_str} Expected token {token} found in {mailbox}.")
-			if mailbox == "INBOX":
-				token_found = MailFound.FOUND
+				if line.startswith("X-Icinga-Test-Id"):
+					token = line.split("X-Icinga-Test-Id: ")[1].strip()
+					debug(f"IMAP: [{mailbox}]:{num_str} A token was found: {token}")
+
+			if token == expected_token:
+				debug(f"IMAP: [{mailbox}]:{num_str} Expected token {token} found in {mailbox}.")
+				if mailbox == "INBOX":
+					token_found = MailFound.FOUND
+				else:
+					token_found = MailFound.FOUND_IN_SPAM
+				break
 			else:
-				token_found = MailFound.FOUND_IN_SPAM
-			break
-		else:
-			debug(f"IMAP: [{mailbox}]:{num_str} Expected token was not found in this e-mail.")
+				debug(f"IMAP: [{mailbox}]:{num_str} Expected token was not found in this e-mail.")
 
 		if cleanup_flag:
 			debug(f"IMAP: [{mailbox}]:{num_str} Mark mail {num_str} as deleted.")
@@ -257,7 +276,7 @@ def main():
 	email = email_create_message(args.mail_from, args.mail_to, _uuid)
 	smtp_server = smtp_connect(args.smtp_host, args.smtp_port, args.smtp_user, args.smtp_pass)
 	smtp_server.sendmail(args.mail_from, args.mail_to, email.as_string())
-	debug(f"SMTP: Mail sent with ID {_uuid}.")
+	debug(f"SMTP: Sent e-mail with ID {_uuid} to {args.mail_to}.")
 
 	status = imap_retrieve_mail(args.imap_host, args.imap_port, args.imap_user, args.imap_pass, args.imap_spam, _uuid,
 								args.imap_cleanup)
